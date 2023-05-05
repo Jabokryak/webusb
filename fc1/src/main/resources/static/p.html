@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Sensors plots</title>
+<style>
+html, body {
+	margin: 0;
+	width: 100%;
+	height: 100%;
+}
+
+#commonDiv {
+	position: relative;
+}
+
+.canvas {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+#lines_canvas {
+	z-index: 1;
+}
+
+#points_canvas {
+	z-index: 2;
+}
+
+.sensorDiv {
+	display: inline-block;
+	margin: 3px;
+}
+
+.view {
+	width: 170px;
+	height: 550px;
+	border: 1px solid #e8dc6f;
+	white-space: pre-wrap;
+}
+
+#mess {
+	width: fit-content;
+}
+
+#mess > span {
+	display: block;
+}
+
+.redtext {
+	color: #cf0237;
+}
+
+.minMaxTable {
+	font-size: 0.7em;
+	width: 170px;
+	text-align: right;
+}
+
+.minMaxTable th {
+	width: 0%;
+	text-align: left;
+	font-weight: normal;
+}
+
+#spinner {
+    width: 170px;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.invisible {
+    display: none;
+}
+</style>
+<script type="module">
+import { PrintMessage } from "/print_message.js";
+import { WebglPlot, ColorRGBA, ColorHSLA, WebglLine, WebglSquare, ColoredHeadGroup, ViewPlot, WebglPoints } from "/webgl-plot.js";	//"https://cdn.skypack.dev/webgl-plot";
+
+const points_canvas	= document.getElementById("points_canvas");
+const lines_canvas	= document.getElementById("lines_canvas");
+
+const points_wglp = new WebglPoints(points_canvas, 3);
+const lines_wglp = new WebglPlot(lines_canvas);
+
+var commonDiv = document.getElementById("commonDiv");
+var spinner = document.getElementById("spinner");
+var mess = new PrintMessage(document.getElementById("mess"));
+var beginDateInput = document.getElementById("historicalSensorDataBeginDate");
+var sensors = {};
+var update_complete = true;
+
+function resizeCanvasToScrollSize(p_canvas) {
+	const width  = p_canvas.scrollWidth;
+	const height = p_canvas.scrollHeight;
+
+	if (p_canvas.width !== width || p_canvas.height !== height) {
+		p_canvas.width  = width;
+		p_canvas.height = height;
+	}
+}
+
+function updatePlots() {
+	console.log("updatePlots");
+
+	resizeCanvasToScrollSize(points_canvas);
+	resizeCanvasToScrollSize(lines_canvas);
+
+	for (let i in sensors) {
+		sensors[i].plot.update();
+	}
+
+	update_complete = true;
+}
+
+function clearPlots() {
+	for (let i in sensors) {
+		sensors[i].plot.clear();
+	}
+
+	requestAnimationFrame(updatePlots);
+}
+
+function getAddPointsFunction(p_sensor_id, q) {
+	let s = sensors[p_sensor_id];
+
+	let j = (s.plot.points_viewPlot.width * s.plot.headXScale - q + 1) / q >> 0;
+	s.xPosArr = new Array(j).fill(0);
+
+	return (n, x, y, z) => {
+		let i = ++s.xPosArr[n];
+
+		if (i > j) {
+			s.xPosArr[n] = 0;
+			i = 1;
+		}
+
+		let plot_x = (i - 1 + (j + 1) * (n - 1))/(q*j + n - 1);
+
+		s.plot.addPoints(plot_x, [x, y, z], false);
+	};
+}
+
+function getHistoricalSensorData() {
+	spinner.classList.remove("invisible");
+
+	const sp = new URLSearchParams([["fromDate", beginDateInput.value]]);
+
+	let historicalDataSSE = new EventSource("getHistoricalSensorData?" + sp);
+
+	historicalDataSSE.addEventListener("close", event => {
+		historicalDataSSE.close();
+
+		//updatePlots();
+
+		spinner.classList.add("invisible");
+	});
+
+	historicalDataSSE.addEventListener("d", event => {
+		let d = JSON.parse(event.data);
+
+		let addPoints = getAddPointsFunction(d.sensor_id, d.sensor_intervals_quantity);
+
+		d.data.forEach(e => addPoints(e[5], e[1], e[2], e[3]));
+	});
+}
+
+document.getElementById("getHistoricalSensorDataButton").addEventListener(
+	"click"
+	,getHistoricalSensorData
+);
+
+document.getElementById("clear").addEventListener(
+	"click"
+	,clearPlots
+);
+
+var onSensorsPointNumber = parseInt(await PrintMessage.sendAndReceiveData("getOnSensorsPointNumber", null, "GET"));
+
+console.log("onSensorsPointNumber = " + onSensorsPointNumber);
+
+let evtSource = new EventSource("getSensors");
+
+evtSource.addEventListener("sensor_close", event => {
+	evtSource.close();
+
+	updatePlots();
+
+	const sensorsDataSEE = new EventSource("getSensorsData");
+
+	/*sensorsDataSEE.addEventListener("wait", event => {
+		console.log("getSensorsData wait");
+	});*/
+
+	sensorsDataSEE.addEventListener("d", event => {
+		let d = JSON.parse(event.data);
+
+		let n = d.pos;
+		let q = onSensorsPointNumber;
+
+		//console.log("pos = " + n);
+
+		d.arr.forEach(e => {
+			let s = sensors[e[0]];
+			let j = (s.plot.points_viewPlot.width * s.plot.headXScale - q + 1) / q >> 0;
+
+			//console.log("sensor id = " + e[0]);
+			//console.log("j = " + j);
+
+			if (s.xPosArr === undefined)
+				s.xPosArr = new Array(j).fill(0);
+
+			let i = ++s.xPosArr[n];
+
+			if (i > j) {
+				s.xPosArr[n] = 0;
+				i = 1;
+			}
+
+			//("i = " + i);
+
+			let plot_x = (i - 1 + (j + 1) * (n - 1))/(q*j + n - 1);
+
+			//console.log("plot_x = " + plot_x);
+
+			s.plot.addPoints(plot_x, [e[1], e[2], e[3]], true);
+		});
+
+		/*if (update_complete) {
+			update_complete = false;
+
+			requestAnimationFrame(updatePlots);
+		}*/
+	});
+});
+
+evtSource.addEventListener("sensor", event => {
+	let resp = JSON.parse(event.data);
+
+	mess.printMessages(resp.messages);
+
+	let sensor = resp.data;
+	let div = document.createElement("div");
+	div.classList.add("sensorDiv");
+
+	const t  = document.createElement("table");
+	t.classList.add("minMaxTable");
+	const c  = document.createElement("caption");
+	c.textContent = "" + sensor.id + " " + sensor.sensor_model + " (" +  sensor.description + ")";
+	t.appendChild(c);
+	div.appendChild(t);
+
+	let view  = document.createElement("div");
+	view.classList.add("view");
+	div.appendChild(view);
+
+	commonDiv.appendChild(div);
+
+	const rect = view.getBoundingClientRect();
+
+	let plot = new ColoredHeadGroup({
+		points_viewPlot			: new ViewPlot(points_wglp, view)
+		,lines_viewPlot			: new ViewPlot(lines_wglp, view)
+		,numberOfColoredHeads	: 3
+		,yNormalizationFactor	: sensor.sensor_model === "QMC5883L" ? 20000 : 400
+		,pointSizeXScale		: (rect.bottom - rect.top) / (2 * (rect.right - rect.left))
+		,printMessage			: (code, message, status, time) =>
+									mess.add({code, message, status, time
+										,id : `Sensor id=${sensor.id} (${sensor.description} ${sensor.sensor_model})`
+									})
+		,minMaxTable			: t
+		//,addTestPoints			: true
+	});
+
+	plot.update();
+
+	sensors[sensor.id] = {sensor, view, plot};
+});
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+	clearTimeout(resizeTimer);
+	resizeTimer = setTimeout(() => requestAnimationFrame(updatePlots), 500);
+});
+</script>
+</head>
+<body>
+<div id="commonDiv">
+	<svg id="spinner" class="invisible" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 15 100 50" preserveAspectRatio="xMidYMid">
+	<circle cx="5" cy="57.5" r="5" fill="#072824">
+		<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.20754716981132076s"></animate>
+	</circle>
+	<circle cx="20" cy="57.5" r="5" fill="#1b4f3e">
+		<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.17789757412398924s"></animate>
+	</circle> <circle cx="35" cy="57.5" r="5" fill="#3d7a52">
+	<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.14824797843665768s"></animate>
+</circle> <circle cx="50" cy="57.5" r="5" fill="#6ca55e">
+	<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.11859838274932614s"></animate>
+</circle> <circle cx="65" cy="57.5" r="5" fill="#a9d066">
+	<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.08894878706199462s"></animate>
+</circle> <circle cx="80" cy="57.5" r="5" fill="#f3f86e">
+	<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.05929919137466307s"></animate>
+</circle> <circle cx="95" cy="57.5" r="5" fill="#f88b6e">
+	<animate attributeName="cy" calcMode="spline" keySplines="0 0.5 0.5 1;0.5 0 1 0.5;0.5 0.5 0.5 0.5" repeatCount="indefinite" values="57.5;42.5;57.5;57.5" keyTimes="0;0.11;0.22;1" dur="0.9433962264150942s" begin="-0.029649595687331536s"></animate>
+</circle>
+</svg>
+	<canvas id="points_canvas" class="canvas"></canvas>
+	<canvas id="lines_canvas" class="canvas"></canvas>
+</div>
+<button id="getHistoricalSensorDataButton">Получить исторические данные</button>
+<input id="historicalSensorDataBeginDate" type="datetime-local" name="historicalSensorDataBeginDate" step="1"
+	value="2022-12-22T08:30:00"
+/>
+<button id="clear">Очистить</button>
+<div id="mess"></div>
+</body>
+</html>

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="UTF-8">
+<style>
+body {
+	display: flex;
+	justify-content: space-around;
+	flex-direction: row-reverse;
+	min-height: 100vh;
+    margin: 0px;
+}
+
+#mainDiv {
+	align-self: center;
+}
+
+#mess {
+	color: #1ecf02;
+	max-width: 50%;
+	overflow: auto;
+	max-height: 100vh;
+}
+
+#mess > span {
+	display: block;
+}
+
+#clear_mess {
+	position:		relative;
+	display:		none;
+	left:			100%;
+}
+
+#clear_mess > svg {
+	stroke:			#9bd814;
+	stroke-width:	5;
+	position:		fixed;
+	margin-left:	-20px;
+	width:			20px;
+	height:			20px;
+	stroke-linecap: round;
+}
+
+#clear_mess:hover > svg {
+	stroke:			#ff7f08;
+}
+
+#mess:hover > #clear_mess {
+	display: block;
+}
+
+.redtext {
+	color: #cf0237;
+}
+
+#tline {
+	width:			400px;
+	height:			100px;
+	margin-bottom:	10px;
+}
+
+#tlineSVG {
+	width: 		100%;
+	height:		100%;
+	position:	relative;
+	border:		1px solid black;
+}
+
+#tlineMagSensor {
+	stroke:				orange;
+}
+
+#tlineTick {
+	stroke-dasharray:	0 39 1 0;
+	stroke:				black;
+	stroke-width:		20px;
+}
+
+.lline {
+	stroke-dasharray	0.8;
+	stroke-width:		2;
+	fill:				none;
+}
+
+.inpSt {
+	width:				5em;
+	text-align:			right;
+	margin-right:		20px;
+}
+
+.hbar {
+	mask:	url(#mask-stripe);
+}
+
+.ledSVG {
+	width:	22px;
+	height:	22px;
+}
+
+.ledDiv {
+	display:		flex;
+	align-items:	center;
+}
+
+.ledParams {
+	width:			60px;
+	margin-left:	5px;
+	text-align:		right;
+	border-width:	0 0 1px 0;
+}
+
+.emptySpan {
+	display:		inline-block;
+	width:			40px;
+}
+
+.offLed {
+	stroke-dasharray:	1;
+}
+
+#saveInt {
+	margin-top:		5px;
+}
+
+.leftMargin {
+	margin-left:	5px;
+}
+
+#magSensorPoint {
+	stroke:				orange;
+	stroke-width:		1;
+	fill:				none;
+	pointer-events:		visible;
+}
+
+.magSensorPointLine {
+	stroke-dasharray:	0.7 1;
+}
+
+.disabled {
+	pointer-events:		none;
+	opacity:			0.4;
+}
+</style>
+<script th:inline="javascript">
+var ppt		= 40;
+var t		= 10
+var lnum	= 0;
+var lines	= {};
+var lcnum	= 0;
+var tlineDiv;
+var tlineSVG;
+var tlineTick;
+var tlineMagSensor;
+var PA1Line;
+var PA2Line;
+var tickInp;
+var periodInp;
+var ledRadio;
+var magSensorSVGPoints = {};
+
+function stretchx() {
+	t			= parseInt(periodInp.value);
+
+	if (!t)
+		return;
+
+	const wd	= ppt * t;
+	const pt1	= "0 0 " + wd + " 100";
+	const pt2	= "0 99 " + wd + " 99";
+	
+	tlineDiv.style.width = wd + "px";
+	tlineSVG.setAttribute("viewBox", pt1);
+	tlineTick.style["stroke-dasharray"] = "0 " + (ppt - 1) + " 1 0";
+	tlineTick.setAttribute("x2", wd);
+	tlineMagSensor.setAttribute("x2", wd);
+
+	Object.keys(magSensorSVGPoints).forEach(key => key > wd && magSensorSVGPoints[key].my_delete());
+
+	for (var k in lines) {
+		var l = lines[k];
+
+		if (l.onPoints.length > t) {
+			l.onPoints.length	= t;
+		}
+
+		l.polyline.setAttribute("points", arrToPoints(l.onPoints, l.index));
+	};
+}
+
+function arrToPoints(a, i) {
+	var s		= "";
+	var pind	= -1;
+	const h		= 40 + i * 3;
+	
+	s	= a[0] === 1 ? `0,${h}` : "0,99";
+
+	a.forEach((el, i) => {
+		if (el == 1) {
+			let x	= ppt * i;
+			let px	= ppt * (pind + 1);
+			//console.log("i = " + i + ",pind = " + pind);
+			
+			if (i > pind + 1) {
+				s	= `${s} ${pind >= 0 ? `${px},${h} ${px},99 ` : ""}${x},99 ${x},${h}`;
+			}
+			
+			pind	= i;
+			//console.log("i = " + i + ",s = " + s);
+		}
+	});
+	
+	const x	= ppt * t;
+	if (pind == t - 1) {
+		s	= `${s} ${x},${h}`;
+	} else {
+		const px	= ppt * (pind + 1);
+		s	= `${s} ${pind >= 0 ? `${px},${h} ${px},99 `: ""}${x},99`;
+	}
+
+	//console.log(s);
+	return s;
+}
+
+function floorMagSensorPoint(xInPixels) {
+	return Math.round(Math.round(xInPixels * tickInp.valueAsNumber / ppt) * ppt / tickInp.valueAsNumber);
+}
+
+function get_nearest_delimiter(p) {
+	let s = 40;
+
+	if (s > p)
+		s = Math.round(s / p) * p;
+	else {
+		if (s > p/2)
+			s = p;
+		else
+			while (p % s != 0)
+				s++;
+	}
+
+	return s;
+}
+
+function recalcFloorMagSensorPoints() {
+	let old_ppt = ppt;
+
+	ppt = get_nearest_delimiter(tickInp.valueAsNumber);
+
+	let tmp_mag_sensor_points = {};
+
+	Object.keys(magSensorSVGPoints).forEach(x => {
+		//console.log("old x = " + x);
+
+		let u = magSensorSVGPoints[x];
+
+		x = floorMagSensorPoint(x * ppt / old_ppt);
+
+		//console.log("new x = " + x);
+
+		if (tmp_mag_sensor_points.hasOwnProperty(x) || x > ppt * periodInp.value) {
+			u.remove();
+
+			//console.log("delete");
+		} else {
+			u.setAttribute("x", x);
+
+			tmp_mag_sensor_points[x] = u
+
+			//console.log("move");
+		}
+	})
+
+	magSensorSVGPoints = tmp_mag_sensor_points;
+
+	stretchx();
+}
+
+function addMagSensorPoint(x) {
+	x = floorMagSensorPoint(x);
+
+	if (!magSensorSVGPoints.hasOwnProperty(x)) {
+		let	u	 	= document.createElementNS("http://www.w3.org/2000/svg", "use");
+		u.setAttributeNS("http://www.w3.org/1999/xlink", "href", "#magSensorPoint");
+		u.setAttribute("x", x);
+		tlineSVG.appendChild(u);
+
+		u.my_delete = function() {
+			delete magSensorSVGPoints[this.getAttribute("x")];
+
+			this.remove();
+		}
+
+		magSensorSVGPoints[x] = u;
+
+		u.addEventListener("contextmenu", function(event) {
+			event.preventDefault();
+
+			this.my_delete();
+		});
+	}
+}
+
+function onLoad() {
+	tlineDiv		= document.getElementById("tline");
+	tlineSVG		= document.getElementById("tlineSVG");
+	tlineMagSensor	= document.getElementById("tlineMagSensor");
+	tlineTick		= document.getElementById("tlineTick");
+	PA1Line			= document.getElementById("PA1Line");
+	PA2Line			= document.getElementById("PA2Line");
+	tickInp			= document.getElementById("tick");
+	periodInp		= document.getElementById("period");
+	ledRadio		= document.getElementById("ledRadio");
+	messDiv			= document.getElementById("mess");
+	magSensorInput	= document.getElementById("magSensorInput");
+	magSensorLedSVG	= document.getElementById("magSensorLedSVG");
+
+	document.getElementById("clear_mess").addEventListener(
+		"click"
+		,() => [...messDiv.children].forEach(c => c.tagName === "SPAN" && messDiv.removeChild(c))
+	);
+
+	function getActiveGroup() {
+		sendAndReceiveData("getActiveGroup", null, "GET")
+			.then(grp => {
+				if (grp) {
+					tickInp.value	= grp.one_tick_length;
+					ppt				= grp.pixels_per_tick;
+					periodInp.value	= grp.whole_length;
+
+					grp.led_intervals?.forEach((el, i) => {
+						lines[el.led_id].onPoints = el.on_points.map(r => r > 0 ? 1 : 0);
+					});
+
+					if (grp.sensor_intervals != undefined)
+						grp.sensor_intervals.map(addMagSensorPoint);
+
+					stretchx();
+				}
+			});
+	};
+
+	function disableEnableOnClick(el) {
+		el.addEventListener("click"
+			,function(event) {
+				var cl		= this.classList;
+				var pl_cl	= this.line.polyline.classList;
+
+				if (cl.contains("hbar")) {
+					cl.remove("hbar");
+					pl_cl.remove("offLed");
+				} else {
+					cl.add("hbar");
+					pl_cl.add("offLed");
+				}
+			}
+		);
+	}
+
+	magSensorInput.line = {}
+	magSensorInput.line.polyline = tlineMagSensor;
+	disableEnableOnClick(magSensorLedSVG);
+	magSensorInput.addEventListener("change", function(event) {
+		if (this.checked)
+			lcnum	= "mag_sensor_line";
+	});
+
+	new EventSource("getMessageFlux").addEventListener("mess", event => printMessage(JSON.parse(event.data)));
+
+	let evtSource = new EventSource("getLeds");
+
+	evtSource.addEventListener("led_close", event => {
+		evtSource.close();
+
+		getActiveGroup();
+	});
+
+	evtSource.addEventListener("led", event => {
+		//console.log(event);
+
+		let resp = JSON.parse(event.data);
+
+		printMessages(resp.messages);
+
+		let led = resp.data;
+		let pl;
+
+		var h	= 99;
+
+		led.color_name = led.color_name ?? "#" + led.color_rgba;
+
+		pl = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+		pl.classList.add("lline")
+		pl.style.stroke = led.color_name;
+		pl.setAttribute("points", `0,${h} ${ppt * t},${h}`);
+		tlineSVG.appendChild(pl);
+
+		lines[led.id]	= {index: lnum + 1, slot_number: led.slot_number, polyline: pl, onPoints: []};
+
+		pl = document.createElement("div");
+		pl.classList.add("ledDiv")
+		let	inp 	= document.createElement("input");
+		inp.type	= "radio";
+		inp.name	= "led";
+		inp.value	= "L" + led.id;
+		inp.led_id	= led.id;
+
+		if (lnum == 0) {
+			inp.checked	= true;
+			lcnum		= led.id;
+		}
+
+		inp.addEventListener("change", function(event) {
+			if (this.checked) {
+				lcnum	= this.led_id;
+				
+				//lines[lcnum].polyline.parentNode.appendChild(lines[lcnum].polyline);
+			}
+		});
+		pl.appendChild(inp);
+
+		let	crcl 	= document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		crcl.classList.add("ledSVG")
+		let	u	 	= document.createElementNS("http://www.w3.org/2000/svg", "use");
+		u.setAttributeNS("http://www.w3.org/1999/xlink", "href", "#ledOnOffSymb");
+		u.setAttribute("fill", led.color_name);
+		u.line	= lines[lnum];
+
+		disableEnableOnClick(u);
+
+		crcl.appendChild(u);
+		pl.appendChild(crcl);
+		
+		/*var txt	= document.createElement("span");
+		txt.classList.add("leftMargin");
+		txt.appendChild(document.createTextNode("Мин. интервал"));
+		pl.appendChild(txt);*/
+		
+		inp 		= document.createElement("input");
+		inp.classList.add("ledParams")
+		inp.type	= "number";
+		inp.value	= led.slot_number
+		pl.appendChild(inp);
+		lines[led.id].slot_number_input	= inp;
+
+		inp 		= document.createElement("input");
+		inp.classList.add("ledParams")
+		inp.type	= "text";
+		inp.value	= led.code
+		pl.appendChild(inp);
+		lines[led.id].code_input	= inp;
+
+		lines[led.id].radio	= pl;
+		
+		ledRadio.appendChild(pl);
+		//lines[0].polyline.parentNode.appendChild(lines[0].polyline);
+
+		lnum++;
+	});
+
+	tickInp.addEventListener("keyup", event => {
+		if (event.keyCode === 13) {
+			event.preventDefault();
+
+			recalcFloorMagSensorPoints();
+		}
+	});
+
+	tickInp.addEventListener("blur", recalcFloorMagSensorPoints);
+
+	periodInp.addEventListener("keyup", event => {
+		if (event.keyCode === 13) {
+			event.preventDefault();
+
+			stretchx();
+		}
+	});
+
+	periodInp.addEventListener("blur", stretchx);
+
+	tlineSVG.addEventListener("click", event => {
+		let lx	= event.offsetX;	// === undefined ? event.layerX : event.offsetX;
+
+		if (lcnum == "mag_sensor_line") {
+			addMagSensorPoint(lx);
+		} else {
+			let x = Math.floor(lx/ppt);
+
+			lines[lcnum].onPoints[x] = lines[lcnum].onPoints[x] === 1 ? 0 : 1;
+
+			lines[lcnum].polyline.setAttribute("points", arrToPoints(lines[lcnum].onPoints, lcnum));
+		}
+	});
+	
+	/*document.querySelectorAll('#onOffTable button')
+		.forEach(p => {
+			let li = document.getElementById("tick");
+
+			p.addEventListener("click", function() {
+				li.checked	= true;
+
+				sendAndReceiveData("commands", {command: this.getAttribute("command_index")});
+			});
+		});*/
+
+	document.getElementById("saveInt")
+		.addEventListener("click", async e => {
+			let p = Object.keys(magSensorSVGPoints);
+
+			const resp = await sendAndReceiveData(
+				"saveIntervals"
+				,{	oneTickLength:	tickInp.valueAsNumber
+					,pixelsPerTick:	ppt
+					,wholeLength:	periodInp.valueAsNumber
+					,lines: Object.keys(lines).flatMap(r =>
+						lines[r].onPoints.length > 0
+							? (
+								({led_id = +r, slot_number_input : {valueAsNumber : slotNumber}, code_input : {value : ledCode}, onPoints}) =>
+									({led_id, slotNumber, ledCode, onPoints})
+							)(lines[r])
+							: []
+					)
+					,...(p.length > 0) && {magSensorPoints: p}
+				}
+			);
+		});
+}
+
+async function sendAndReceiveData(page, data, method = "POST") {
+	try {
+		const response = await fetch(
+			page
+			,{	method:	method
+				,mode:	"same-origin"
+				,cache:	"no-cache"
+				,headers: {"Content-Type": "application/json"}
+				,redirect: "follow"
+				,...(method == "POST") && {body:	JSON.stringify(data)}
+			}
+		);
+
+		if (response === undefined)
+			throw Error("Response is empty");
+
+		let resp = await response.json();
+
+		if (resp && resp.hasOwnProperty("messages"))
+			printMessages(resp.messages);
+
+		return resp.data;
+	} catch (e) {
+		window.alert(e);
+
+		throw e;
+	}
+}
+
+function printMessage(msg) {
+	let msgSpan = document.createElement("span");
+
+	msgSpan.textContent =
+		//new Date().toLocaleTimeString()
+		msg.time
+		+ " " + msg.code
+		+ ", " + msg.message;
+
+	if (!msg.status)
+		msgSpan.classList.add("redtext");
+
+	mess.appendChild(msgSpan);
+}
+
+function printMessages(messages) {
+	messages.forEach(printMessage);
+}
+
+function message(code, message, status = true, time = new Date().toLocaleTimeString()) {
+	printMessage({code: code, message: message, status: status, time: time});
+}
+
+function sendCommand(str_command, radio_button_id) {
+	document.getElementById(radio_button_id).checked = true;
+
+	sendAndReceiveData("commands", {command: str_command});
+}
+</script>
+</head>
+<body onload="onLoad()">
+<div id="mess">
+	<div id="clear_mess">
+		<svg  viewBox="0 0 20 20">
+			<line x1="5" y1="5" x2="15" y2="15"></line>
+			<line x1="5" y1="15" x2="15" y2="5"></line>
+		</svg>
+	</div>
+</div>
+<div id="mainDiv">
+<div id="tline">
+	<svg id="tlineSVG" viewbox="0 0 400 100" preserveAspectRatio="xMinYMax meet">
+		<defs>
+			<pattern id="patternStripe" 
+				width="4" height="4" 
+				patternUnits="userSpaceOnUse"
+				patternTransform="rotate(45)">
+				<rect width="2" height="4" transform="translate(0,0)" fill="white"></rect>
+			</pattern>
+			<mask id="mask-stripe">
+				<rect x="0" y="0" width="100%" height="100%" fill="url(#patternStripe)"></rect>
+			</mask>      
+
+			<g id="ledOnOffSymb">
+				<circle cx="11" cy="11" r="10" stroke="none"></circle>
+				<circle cx="11" cy="11" r="10" stroke="black" stroke-width="1" fill="none"></circle>
+			</g>
+
+			<g id="magSensorPoint">
+				<line class="magSensorPointLine" x1="0" y1="0" x2="0" y2="100"></line>
+				<circle cx="0" cy="20" r="5"></circle>
+			</g>
+		</defs>
+
+		<line id="tlineMagSensor" x1="0" y1="20" x2="400" y2="20"></line>
+		<line id="tlineTick" x1="0" y1="100" x2="400" y2="100"></line>
+	</svg>
+</div>
+<div>
+Цена деления, мс
+<input type="number" id="tick" class="inpSt">
+Длина периода
+<input type="number" id="period" class="inpSt">
+</div>
+<div id="ledRadio"></div>
+<div class="ledDiv">
+	<input id="magSensorInput" type="radio" name="led" value="D">
+	<svg class="ledSVG">
+		<use id="magSensorLedSVG" href="#ledOnOffSymb" fill="orange"/>
+	</svg>
+</div>
+<button id="saveInt">Сохранить интервалы</button>
+<hr/>
+<table id="onOffTable">
+	<tr th:each="pr,prIterStat : ${T(ml_pkg.model.McCommand).pair}">
+		<div th:each="cm,cmIterStat : ${pr}">
+			<td><input th:id="|${cm}_Inp|" type="radio" th:name="|RadioGroup${prIterStat.count}|" th:checked="${cmIterStat.odd}" class="disabled"></td>
+			<td><button th:text="${cm.getName}" th:attr="onclick=|sendCommand('${cm}', '${cm}_Inp')|"/></td>
+		</div>
+	</tr>
+</table>
+</div>
+</body>
+</html>

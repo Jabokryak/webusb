@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>wrm3</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.jdt.core.javabuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.m2e.core.maven2Builder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>org.eclipse.m2e.core.maven2Nature</nature>
+		<nature>org.eclipse.jdt.core.javanature</nature>
+	</natures>
+	<linkedResources>
+		<link>
+			<name>hid4java_win32-x86-64</name>
+			<type>2</type>
+			<location>D:/MagLight/EclipseWS/hid4java-develop/target/classes/win32-x86-64</location>
+		</link>
+		<link>
+			<name>libusb_dll</name>
+			<type>2</type>
+			<location>D:/MagLight/USB4Java/libusb-1.0.21/MS64/dll</location>
+		</link>
+	</linkedResources>
+</projectDescription>

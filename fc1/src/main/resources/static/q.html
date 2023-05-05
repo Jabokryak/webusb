@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Sensors plots</title>
+	<style>
+html, body {
+	margin: 0;
+	width: 100%;
+	height: 100%;
+}
+
+#commonDiv {
+	position: relative;
+}
+
+.canvas {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+#lines_canvas {
+	z-index: 1;
+}
+
+#points_canvas {
+	z-index: 2;
+}
+
+.sensorDiv {
+	display: inline-block;
+	margin: 3px;
+}
+
+#view1 {
+	width: 700px;
+	height: 550px;
+	border: 1px solid #e8dc6f;
+	white-space: pre-wrap;
+}
+
+#mess {
+	width: fit-content;
+}
+
+#mess > span {
+	display: block;
+}
+
+.redtext {
+	color: #cf0237;
+}
+
+.sensorName {
+	font-size: 0.7em;
+}
+
+#spinner {
+    width: 170px;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.invisible {
+    display: none;
+}
+</style>
+	<script type="module">
+import { PrintMessage } from "/print_message.js";
+import { WebglPlot, ColorRGBA, ColorHSLA, WebglLine, WebglSquare, ColoredHeadGroup, ViewPlot, WebglPoints } from "/webgl-plot.js";	//"https://cdn.skypack.dev/webgl-plot";
+
+const points_canvas	= document.getElementById("points_canvas");
+const lines_canvas	= document.getElementById("lines_canvas");
+
+const points_wglp = new WebglPoints(points_canvas, 2);
+const lines_wglp = new WebglPlot(lines_canvas);
+
+var commonDiv = document.getElementById("commonDiv");
+var view1 = document.getElementById("view1");
+var mess = new PrintMessage(document.getElementById("mess"));
+var beginDateInput = document.getElementById("historicalSensorDataBeginDate");
+var sensors = {};
+var update_complete = true;
+
+function resizeCanvasToScrollSize(p_canvas) {
+	const width  = p_canvas.scrollWidth;
+	const height = p_canvas.scrollHeight;
+
+	if (p_canvas.width !== width || p_canvas.height !== height) {
+		p_canvas.width  = width;
+		p_canvas.height = height;
+	}
+}
+
+function updatePlots() {
+	resizeCanvasToScrollSize(points_canvas);
+	resizeCanvasToScrollSize(lines_canvas);
+
+	for (let i in sensors) {
+		sensors[i].plot.update();
+	}
+
+	update_complete = true;
+}
+
+function getAddPointsFunction(p_sensor_id, q) {
+	let s = sensors[p_sensor_id];
+
+	let j = (s.plot.points_viewPlot.width * s.plot.headXScale - q + 1) / q >> 0;
+	s.xPosArr = new Array(j).fill(0);
+
+	return (n, x, y, z) => {
+		let i = ++s.xPosArr[n];
+
+		if (i > j) {
+			s.xPosArr[n] = 0;
+			i = 1;
+		}
+
+		let plot_x = (i - 1 + (j + 1) * (n - 1))/(q*j + n - 1);
+
+		s.plot.addPoints(plot_x, [x, y], false);
+	};
+}
+
+	const rect = view1.getBoundingClientRect();
+
+	let plot = new ColoredHeadGroup({
+		points_viewPlot			: new ViewPlot(points_wglp, view1)
+		,lines_viewPlot			: new ViewPlot(lines_wglp, view1)
+		,numberOfColoredHeads	: 2
+		,yNormalizationFactor	: 1
+		,pointSizeXScale		: (rect.bottom - rect.top) / (2 * (rect.right - rect.left))
+		,printMessage			: (code, message, status, time) =>
+									mess.add({code, message, status, time
+										,id : `Sensor id=0`
+									})
+		//,addTestPoints			: true
+	});
+
+	plot.update();
+
+	sensors[0] = {view : view1, plot};
+
+let addPoints = getAddPointsFunction(0, 10);
+document.getElementById("getHistoricalSensorDataButton").addEventListener(
+	"click"
+	,() => {
+		sensors[0].plot.addPoints(j, [j, j], true);
+		j+=0.02;
+	}
+);
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+	clearTimeout(resizeTimer);
+	resizeTimer = setTimeout(() => requestAnimationFrame(updatePlots), 500);
+});
+
+updatePlots();
+
+var j=-1, k=0;
+/*for(let i = 0, j=0; i < 15; i++, j+=0.02) {
+	sensors[0].plot.addPoints(j, [j, j], true);
+}*/
+sensors[0].plot.addPoints(0, [0.1, 0.1], false);
+
+var q = setInterval(
+	() => {
+		j+=0.02;
+		if (j >= 1) {
+			k+=0.01;
+			j=-1;
+			if (k>1) clearInterval(q);
+		}
+		sensors[0].plot.addPoints(k, [j, j], true);
+	}
+	,50
+);
+</script>
+</head>
+<body>
+<div id="commonDiv">
+	<div id="view1"></div>
+	<canvas id="points_canvas" class="canvas"></canvas>
+	<canvas id="lines_canvas" class="canvas"></canvas>
+</div>
+<button id="getHistoricalSensorDataButton">Получить исторические данные</button>
+<div id="mess"></div>
+</body>
+</html>
